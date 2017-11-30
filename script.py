@@ -10,81 +10,11 @@ import scipy
 
 from skimage.util.shape import view_as_windows
 
+from scipy.signal import hamming
+
 import matplotlib.pyplot as plt 
-
-
-# ==============================================================================
-# Debug Plotting Functions
-# ==============================================================================
-
-PLOT_ON = False
-SAVE_FIG = True
-FIG_COUNT = 0
-PLAY_AUDIO = True
-
-"""
-Takes the Fourier transform of samples, shifts them, and plots them
-"""
-def plot_fft(x,title='FFT',phaseplot=False,dbplot=True,normalize=False):
-    X = fftshift(fft(x,n=4096))
-    plot_freq(X,title,phaseplot,dbplot,normalize)
-
-"""
-Plots samples from a Fourier transform
-"""
-def plot_freq(X,title='FFT',phaseplot=False,dbplot=True,normalize=False):
-    # checks if plotting has been disabled
-    global PLOT_ON, SAVE_FIG, FIG_COUNT
-    if not PLOT_ON:
-        return
-
-    # normalizes the fft
-    if normalize:
-        X /= len(X)
-
-    # calculates xaxis for plot
-    freq = np.arange(len(X)) / len(X) * 2 - 1
-    
-    # plots FFT
-    if phaseplot:
-        resp = np.angle(X)
-        norm = resp/pi
-
-        plt.plot(freq,norm)
-        plt.ylabel('Normalized Phase')
-    elif dbplot:
-        resp = np.abs(X)
-        norm = 20*np.log10(resp)
-
-        plt.plot(freq,norm)
-        plt.ylabel('Magnitude (dB)')
-    else:
-        resp = np.abs(X)
-
-        plt.plot(freq,resp)
-        plt.ylabel('Magnitude')
-
-    plt.title(title)
-    plt.xlabel('Normalized Freq')
-
-    plt.grid()
-    axes = plt.gca()
-    axes.set_xlim([-1,1])
-
-    if SAVE_FIG:
-        fname = 'fig%02d.png' % FIG_COUNT
-        plt.savefig(fname)
-        print('Saved %s' % fname)
-        FIG_COUNT += 1
-        plt.gcf().clear()
-    else:
-        plt.show()
-
-# ==============================================================================
-
-################################################################################
-################################################################################
-################################################################################
+import matplotlib as mpl 
+import matplotlib.colors as colors
 
 # ==============================================================================
 
@@ -114,27 +44,50 @@ def td_dft(dat, winlen, winoverlap, dftsize):
     if winlen > dftsize:
         views = [ time_alias(v,dftsize) for v in views ]
 
-    dfts = [ fft(v,dftsize) for v in views ]
+    win = hamming(winlen)
+    dfts = [ fftshift(fft(v*win,dftsize)) for v in views ]
 
     return np.array(dfts)
 
 # ==============================================================================
 
-def heatplot(dat):
-    plt.imshow(dat, cmap='hot', interpolation='nearest')
+def dB(x):
+    return 10*np.log10(x)
+
+def heatplot(dat,smprate=2048000):
+    """
+    X, Y = np.mgrid[0:dat.shape[0]/smprate:complex(0,dat.shape[0]), -1:1:complex(0,dat.shape[-1])]
+
+    Z1 = dat
+
+    fig, ax = plt.subplots(2, 1)
+
+    pcm = ax[0].pcolor(X, Y, Z1, cmap='PuBu_r')
+    fig.colorbar(pcm, ax=ax[0], norm=colors.LogNorm(vmin=Z1.min(), vmax=Z1.max()), extend='max')
+
+    pcm = ax[1].pcolor(X, Y, Z1, cmap='PuBu_r')
+    fig.colorbar(pcm, ax=ax[1], extend='max')
+    fig.show()
+    """
+    """
+    X, Y = np.mgrid[0:dat.shape[0]/smprate:complex(0,dat.shape[0]), -1:1:complex(0,dat.shape[-1])]
+    plt.imshow(X,Y,dat, interpolation='nearest')
+    plt.show()
+    """
+    plt.imshow(dB(dat), cmap='hot', interpolation='nearest')
     plt.show()
 
 # ==============================================================================
 
 def spectrogram(dat, winlen, winoverlap, dftsize):
-    mat = td_dft(dat, 256, 128, 512)
+    mat = td_dft(dat, winlen, winoverlap, dftsize)
     mag = np.abs(mat)
     sqr = mag*mag
-    #sqr = np.transpose(sqr)
     return sqr
 
-def power_est(dat):
-    None
+def power_est(spec):
+    pgram = np.sum(spec,axis=0) / spec.shape[0]
+    return pgram
 
 def noise_est(spec, percent):
     sort = np.sort(spec.flatten())
@@ -158,37 +111,57 @@ def strongest(spec, n=5):
 # Processing Function
 # ==============================================================================
 
-def process(infile):
-    # load data
-    samples = scipy.fromfile(open(infile), dtype=scipy.complex64)
+def process(samples):
+    # winlen, winoverlap, dftsize
+    spec = spectrogram(samples,4096,2048,4096)
+    heatplot(spec)
 
-    # select how much data to process
-    x = samples[:len(samples):8]
+    pest = power_est(spec)
 
-    spec = spectrogram(x,256,128,512)
-    #heatplot(spec)
+    #sigma = noise_est(spec,.8)
+    sigma = noise_est(spec,.9)
+    print(sigma)
+    print(dB(sigma))
 
-    power_est(x)
+    plt.plot(dB(pest))
+    plt.plot(np.array(4096*[dB(sigma)]))
+    plt.show()
 
-    sigma = noise_est(spec,.2)
-    #print(sigma)
-
-    detects = band_occupancy(spec, sigma, 20)
-    #heatplot(detects)
+    #detects = band_occupancy(spec, sigma, -3)
+    detects = band_occupancy(spec, sigma, 7)
+    heatplot(detects)
 
     strong = strongest(spec)
     print(strong)
 
 # ==============================================================================
 
+def chirp_sample(a,dur,fs):
+    t = np.arange(0,dur,1/fs)
+    #print(t.shape)
+    sig = np.cos( a*(t*t) )
+    #print(sig)
 
+    return sig
+
+    #plt.plot(t,sig)
+    #plt.show()
+
+def ld_file(infile):
+    return scipy.fromfile(open(infile), dtype=scipy.complex64)
 
 # ==============================================================================
 # Main Function
 # ==============================================================================
 
 if __name__ == '__main__':
-    process('blind_test.raw')
+    #dat = ld_file('blind_test.raw')
+    dat = ld_file('blind_test_project02.raw')
+    #dat = chirp_sample(pi,5,256000)
+
+    plt.plot(dat)
+    plt.show()
+    process(dat)
 
 # ==============================================================================
 
