@@ -189,14 +189,16 @@ def ld_file(infile):
     return scipy.fromfile(open(infile), dtype=scipy.complex64)
 
 def builtin_spectrogram(infile):
-    dat = ld_file('blind_test_project02.raw')
-    dat = np.abs(dat)
+    dat = ld_file(infile)
+    #dat = np.abs(dat)
     f,t,Sxx = scipy.signal.spectrogram(
         dat,
         fs=2048000,
         window=blackman(4096),
+        nperseg=4096,
         noverlap=2048,
         nfft=4096,
+        return_onesided=False,
         scaling='spectrum',
         mode='magnitude'
     )
@@ -210,6 +212,8 @@ def builtin_spectrogram(infile):
 # Main Function
 # ==============================================================================
 
+files = ['blind_test.raw','blind_test_project02.raw']
+
 if __name__ == '__main__':
     # data, percent noise estimate, eta
     #process(ld_file('blind_test.raw'), .5, 8)
@@ -218,7 +222,7 @@ if __name__ == '__main__':
     #chirp_test()
     #chirp_sample(15*pi*10**-6,5,256000)
 
-    builtin_spectrogram('blind_test_project02.raw')
+    builtin_spectrogram(files[0])
     dat = ld_file('blind_test_project02.raw')
     allpole_est(dat,10)
 
